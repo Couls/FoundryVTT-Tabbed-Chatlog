@@ -1,9 +1,11 @@
+import { dice3dEnabled} from "./setupCompat.js";
+
 let currentTab = "ic";
 let salonEnabled = false;
 let turndown = undefined;
 
 function isMessageTypeVisible(messageType) {
-
+    if(game.settings.get("tabbed-chatlog", "tabsDisabled")) return true;
     if (salonEnabled) {
         switch (messageType) {
             case CONST.CHAT_MESSAGE_TYPES.OTHER:
@@ -14,26 +16,10 @@ function isMessageTypeVisible(messageType) {
         }
     }
     switch (currentTab) {
-        case "rolls":
-            switch (messageType) {
-                case CONST.CHAT_MESSAGE_TYPES.OTHER:
-                    return true;
-                case CONST.CHAT_MESSAGE_TYPES.OOC:
-                    return false;
-                case CONST.CHAT_MESSAGE_TYPES.IC:
-                    return false
-                case CONST.CHAT_MESSAGE_TYPES.EMOTE:
-                    return false
-                case CONST.CHAT_MESSAGE_TYPES.WHISPER:
-                    return false;
-                case CONST.CHAT_MESSAGE_TYPES.ROLL:
-                    return true;
-            }
-            break;
         case "ic":
             switch (messageType) {
                 case CONST.CHAT_MESSAGE_TYPES.OTHER:
-                    return false;
+                    return true;
                 case CONST.CHAT_MESSAGE_TYPES.OOC:
                     return false;
                 case CONST.CHAT_MESSAGE_TYPES.IC:
@@ -43,7 +29,7 @@ function isMessageTypeVisible(messageType) {
                 case CONST.CHAT_MESSAGE_TYPES.WHISPER:
                     return game.settings.get("tabbed-chatlog", "icWhispers");
                 case CONST.CHAT_MESSAGE_TYPES.ROLL:
-                    return false;
+                    return true;
             }
             break;
         case "ooc":
@@ -75,7 +61,7 @@ function isMessageVisible(e) {
     if (!isMessageTypeVisible(messageType)) return false;
 
     if (e.data.speaker.scene && game.settings.get("tabbed-chatlog", "perScene")) {
-        if ((messageType == CONST.CHAT_MESSAGE_TYPES.IC || messageType == CONST.CHAT_MESSAGE_TYPES.EMOTE) && (e.data.speaker.scene != game.user.viewedScene)) return false;
+        if ((messageType == CONST.CHAT_MESSAGE_TYPES.IC || messageType == CONST.CHAT_MESSAGE_TYPES.EMOTE) && (e.data.speaker.scene != game.user.viewedScene) && !game.user.isGM) return false;
     }
 
     if (e.data.blind && e.data.whisper.find(element => element == game.userId) == undefined) return false;
@@ -95,46 +81,47 @@ function setClassVisibility(cssClass, visible) {
 Hooks.on("renderChatLog", async function (chatLog, html, user) {
 
     if (shouldHideDueToStreamView()) return;
-
+    if(!game.settings.get("tabbed-chatlog", "tabsDisabled")) {
     let toPrepend = '<nav class="tabbedchatlog tabs">';
     toPrepend += `<a class="item ic" data-tab="ic">${game.i18n.localize("TC.TABS.IC")}</a><i id="icNotification" class="notification-pip fas fa-exclamation-circle" style="display: none;"></i>`;
-    toPrepend += `<a class="item rolls" data-tab="rolls">${game.i18n.localize("TC.TABS.Rolls")}</a><i id="rollsNotification" class="notification-pip fas fa-exclamation-circle" style="display: none;"></i>`;
     toPrepend += `<a class="item ooc" data-tab="ooc">${game.i18n.localize("TC.TABS.OOC")}</a></nav><i id="oocNotification" class="notification-pip fas fa-exclamation-circle" style="display: none;"></i>`;
     html.prepend(toPrepend);
-
+    }
     window.game.tabbedchat = {};
 
     window.game.tabbedchat.tabs = new TabsV2({
         navSelector: ".tabs",
         contentSelector: ".content",
         initial: "tab1",
-        callback: function (event, html, tab) {
+        callback: function t(event, html, tab) {
             currentTab = tab;
 
             switch (tab) {
-                case "rolls":
                 case "ic":
                 case "ooc":
 
                     setClassVisibility($(".type0"), isMessageTypeVisible(CONST.CHAT_MESSAGE_TYPES.OTHER));
                     setClassVisibility($(".type1"), isMessageTypeVisible(CONST.CHAT_MESSAGE_TYPES.OOC));
-                    setClassVisibility($(".type2").filter(".scenespecific"), false);
+                    if(!game.user.isGM) setClassVisibility($(".type2").filter(".scenespecific"), false);
+                    else setClassVisibility($(".type2").filter(".scenespecific"), true);
                     setClassVisibility($(".type2").not(".scenespecific"), isMessageTypeVisible(CONST.CHAT_MESSAGE_TYPES.IC));
                     setClassVisibility($(".type2").filter(".scene" + game.user.viewedScene), isMessageTypeVisible(CONST.CHAT_MESSAGE_TYPES.IC));
-                    setClassVisibility($(".type3").filter(".scenespecific"), false);
+                    if(!game.user.isGM) setClassVisibility($(".type3").filter(".scenespecific"), false);
+                    else setClassVisibility($(".type3").filter(".scenespecific"), true);
                     setClassVisibility($(".type3").not(".scenespecific"), isMessageTypeVisible(CONST.CHAT_MESSAGE_TYPES.EMOTE));
                     setClassVisibility($(".type3").filter(".scene" + game.user.viewedScene), isMessageTypeVisible(CONST.CHAT_MESSAGE_TYPES.EMOTE));
                     setClassVisibility($(".type4"), isMessageTypeVisible(CONST.CHAT_MESSAGE_TYPES.WHISPER));
-					setClassVisibility($(".type5").filter(".scenespecific"), false);
+					if(!game.user.isGM) setClassVisibility($(".type5").filter(".scenespecific"), false);
+                    else setClassVisibility($(".type5").filter(".scenespecific"), true);
 					setClassVisibility($(".type5").filter(".gm-roll-hidden"), false);
 					setClassVisibility($(".type5").filter(".scene" + game.user.viewedScene), isMessageTypeVisible(CONST.CHAT_MESSAGE_TYPES.ROLL));
                     setClassVisibility($(".type5").not(".scenespecific").not(".gm-roll-hidden"), isMessageTypeVisible(CONST.CHAT_MESSAGE_TYPES.ROLL));
 
                     $("#" + tab + "Notification").hide();
+                    $("#chat-log").scrollTop(999999);
                     break;
             }
-
-            $("#chat-log").scrollTop(9999999);
+            $("#chat-log").scrollTop(999999);
         }
     });
     window.game.tabbedchat.tabs.bind(html[0]);
@@ -174,38 +161,24 @@ Hooks.on("renderChatMessage", (chatMessage, html, data) => {
 
     if (salonEnabled && chatMessage.data.type == CONST.CHAT_MESSAGE_TYPES.WHISPER) return;
 
-    if (currentTab == "rolls") {
-        if (chatMessage.data.type == CONST.CHAT_MESSAGE_TYPES.OTHER && sceneMatches) {
-            html.css("display", "list-item");
-        } else if (data.message.type == CONST.CHAT_MESSAGE_TYPES.ROLL && sceneMatches) {
-            if (!html.hasClass('gm-roll-hidden')) {
-                html.css("display", "list-item");
-            }
-        } else {
-            html.css("cssText", "display: none !important;");
-            html.addClass("hardHide");
-        }
-    } else if (currentTab == "ic") {
+    if (currentTab == "ic" || game.settings.get("tabbed-chatlog", "tabsDisabled")) {
         if ((data.message.type == CONST.CHAT_MESSAGE_TYPES.IC
     	  || data.message.type == CONST.CHAT_MESSAGE_TYPES.EMOTE
-		  || (data.message.type == CONST.CHAT_MESSAGE_TYPES.WHISPER && game.settings.get("tabbed-chatlog", "icWhispers"))) && sceneMatches) {
+		  || (data.message.type == CONST.CHAT_MESSAGE_TYPES.ROLL && !html.hasClass('gm-roll-hidden'))
+          || data.message.type == CONST.CHAT_MESSAGE_TYPES.OTHER
+          || (data.message.type == CONST.CHAT_MESSAGE_TYPES.WHISPER
+             && game.settings.get("tabbed-chatlog", "icWhispers"))) && sceneMatches) {
             html.css("display", "list-item");
-        } else {
+        } else if((!game.settings.get("tabbed-chatlog", "tabsDisabled") || !sceneMatches) && !game.user.isGM) {
             html.css("cssText", "display: none !important;");
             html.addClass("hardHide");
         }
-    } else if (currentTab == "ooc") {
+    } if (currentTab == "ooc" || game.settings.get("tabbed-chatlog", "tabsDisabled")) {
         if (data.message.type == CONST.CHAT_MESSAGE_TYPES.OOC || (data.message.type == CONST.CHAT_MESSAGE_TYPES.WHISPER && !game.settings.get("tabbed-chatlog", "icWhispers"))) {
             html.css("display", "list-item");
-        } else {
+        } else if(!game.settings.get("tabbed-chatlog", "tabsDisabled")) {
             html.css("display", "none");
         }
-    }
-});
-
-Hooks.on("diceSoNiceRollComplete", (id) => {
-    if (currentTab != "rolls") {
-        $("#chat-log .message[data-message-id=" + id + "]").css("display", "none");
     }
 });
 
@@ -215,32 +188,17 @@ Hooks.on("createChatMessage", (chatMessage, content) => {
     if (chatMessage.data.speaker.scene) {
         if (chatMessage.data.speaker.scene != game.user?.viewedScene) {
             sceneMatches = false;
+            if(game.user.isGM) {
+                $(".message-metadata").insertBefore("(In Another Scene)")
+            }
         }
     }
 
-    if (chatMessage.data.type == CONST.CHAT_MESSAGE_TYPES.OTHER) {
-        if (currentTab != "rolls" && sceneMatches) {
-            if (game.settings.get("tabbed-chatlog", "autoNavigate")) {
-                window.game.tabbedchat.tabs.activate("rolls", {triggerCallback: true});
-            }
-            else {
-                setRollsNotifyProperties();
-                $("#rollsNotification").show();
-            }
-        }
-    } else if (chatMessage.data.type == CONST.CHAT_MESSAGE_TYPES.ROLL) {
-        if (currentTab != "rolls" && sceneMatches && chatMessage.data.whisper.length == 0) {
-            if (game.settings.get("tabbed-chatlog", "autoNavigate")) {
-                window.game.tabbedchat.tabs.activate("rolls", {triggerCallback: true});
-            }
-            else {
-                setRollsNotifyProperties();
-                $("#rollsNotification").show();
-            }
-        }
-    } else if (chatMessage.data.type == CONST.CHAT_MESSAGE_TYPES.IC
-            || chatMessage.data.type == CONST.CHAT_MESSAGE_TYPES.EMOTE
-            || (chatMessage.data.type == CONST.CHAT_MESSAGE_TYPES.WHISPER && game.settings.get("tabbed-chatlog", "icWhispers"))) {
+    if (chatMessage.data.type == CONST.CHAT_MESSAGE_TYPES.IC
+        || chatMessage.data.type == CONST.CHAT_MESSAGE_TYPES.EMOTE
+        || chatMessage.data.type == CONST.CHAT_MESSAGE_TYPES.OTHER
+        || chatMessage.data.type == CONST.CHAT_MESSAGE_TYPES.ROLL
+        || (chatMessage.data.type == CONST.CHAT_MESSAGE_TYPES.WHISPER && game.settings.get("tabbed-chatlog", "icWhispers"))) {
         if (currentTab != "ic" && sceneMatches) {
             if (game.settings.get("tabbed-chatlog", "autoNavigate")) {
                 window.game.tabbedchat.tabs.activate("ic", {triggerCallback: true});
@@ -401,19 +359,17 @@ Hooks.on("renderSceneNavigation", (sceneNav, html, data) => {
     if (shouldHideDueToStreamView()) return;
 
     var viewedScene = sceneNav.scenes.find(x => x.isView);
-
+    if(!game.user.isGM) {
     $(".scenespecific").hide();
-    if (currentTab == "rolls") {
-        $(".type0.scene" + game.user.viewedScene).removeClass("hardHide");
-        $(".type0.scene" + viewedScene.id).show();
-        $(".type5.scene" + game.user.viewedScene).removeClass("hardHide");
-        $(".type5.scene" + viewedScene.id).not(".gm-roll-hidden").show();
-    } else if (currentTab == "ic") {
-        $(".type2.scene" + game.user.viewedScene).removeClass("hardHide");
-        $(".type2.scene" + viewedScene.id).show();
-        $(".type3.scene" + game.user.viewedScene).removeClass("hardHide");
-        $(".type3.scene" + viewedScene.id).show();
     }
+    $(".type0.scene" + game.user.viewedScene).removeClass("hardHide");
+    $(".type0.scene" + viewedScene.id).show();
+    $(".type5.scene" + game.user.viewedScene).removeClass("hardHide");
+    $(".type5.scene" + viewedScene.id).not(".gm-roll-hidden").show();
+    $(".type2.scene" + game.user.viewedScene).removeClass("hardHide");
+    $(".type2.scene" + viewedScene.id).show();
+    $(".type3.scene" + game.user.viewedScene).removeClass("hardHide");
+    $(".type3.scene" + viewedScene.id).show();
 });
 
 
@@ -495,19 +451,13 @@ function setICNotifyProperties() {
     $("#icNotification").css({'right': ($("div#sidebar.app").width() / nTabs * (nTabs - 1)).toString() + 'px'});
 };
 
-function setRollsNotifyProperties() {
-    const nTabs = $("nav.tabbedchatlog.tabs > a.item").length;
-    $("#rollsNotification").css({'right': ($("div#sidebar.app").width() / nTabs * (nTabs - 2)).toString() + 'px'});
-};
-
 function setOOCNotifyProperties() {
     const nTabs = $("nav.tabbedchatlog.tabs > a.item").length;
-    $("#oocNotification").css({'right': ($("div#sidebar.app").width() / nTabs * (nTabs - 3)).toString() + 'px'});
+    $("#oocNotification").css({'right': ($("div#sidebar.app").width() / nTabs * (nTabs - 2)).toString() + 'px'});
 };
 
 function setALLTabsNotifyProperties() {
     setICNotifyProperties();
-    setRollsNotifyProperties();
     setOOCNotifyProperties();
 }
 
@@ -600,7 +550,15 @@ Hooks.on('init', () => {
         default: false,
         type: Boolean,
     });
-
+    game.settings.register('tabbed-chatlog', 'tabsDisabled', {
+        name: 'Disable Tabbed Chatlog',
+        hint: 'Checking this will remove chat tabs and put all messages in one place like usual',
+        scope: 'client',
+        config: true,
+        default: false,
+        type: Boolean,
+        onChange: () => window.location.reload(),
+    })
     salonEnabled = game.data.modules.find(x => x.id == "salon")?.active;
 });
 
